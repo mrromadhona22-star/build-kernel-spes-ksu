@@ -43,6 +43,16 @@ jobs:
             libelf-dev libssl-dev libxml2-dev python3 python3-pip zip zstd \
             libncurses5-dev libncurses-dev lld llvm clang binutils-aarch64-linux-gnu
 
+          LIBXML_REAL=$(find /usr/lib -name "libxml2.so.*" ! -name "libxml2.so.2" -type f | head -n 1)
+          if [ -z "$LIBXML_REAL" ]; then
+            LIBXML_REAL=$(find /usr/lib -name "libxml2.so.*" ! -name "libxml2.so.2" | head -n 1)
+          fi
+          if [ -n "$LIBXML_REAL" ]; then
+            sudo ln -sf "$LIBXML_REAL" /usr/lib/x86_64-linux-gnu/libxml2.so.2
+            sudo ldconfig
+          fi
+          ls -la /usr/lib/x86_64-linux-gnu/libxml2.so* || true
+
       - name: Clone kernel source
         run: |
           git clone --depth=1 -b "${{ inputs.kernel_branch }}" "${{ inputs.kernel_repo }}" kernel_src
