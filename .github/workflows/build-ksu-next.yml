@@ -1,0 +1,122 @@
+name: Build Kernel spes (KernelSU-Next)
+
+on:
+  workflow_dispatch:
+    inputs:
+      kernel_repo:
+        description: 'URL repositori source kernel'
+        required: true
+        default: 'https://github.com/Evolution-X-Devices/kernel_xiaomi_sm6225'
+      kernel_branch:
+        description: 'Branch source kernel (YogratBuilds atau bka)'
+        required: true
+        default: 'YogratBuilds'
+      defconfig:
+        description: 'Nama defconfig target spes'
+        required: true
+        default: 'vendor/spes-perf_defconfig'
+      ksu_branch:
+        description: 'Branch KernelSU-Next'
+        required: true
+        default: 'next'
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Maximize swap space on runner
+        run: |
+          sudo fallocate -l 8G /swapfile
+          sudo chmod 600 /swapfile
+          sudo mkswap /swapfile
+          sudo swapon /swapfile
+          free -h
+
+      - name: Install build dependencies
+        run: |
+          sudo apt-get update -y
+          sudo apt-get install -y \
+            bc bison build-essential ccache curl flex git wget \
+            libelf-dev libssl-dev python3 python3-pip zip zstd \
+            libncurses5-dev lld llvm clang binutils-aarch64-linux-gnu
+
+      - name: Clone kernel source
+        run: |
+          git clone --depth=1 -b "${{ inputs.kernel_branch }}" "${{ inputs.kernel_repo }}" kernel_src
+
+      - name: Setup KernelSU-Next
+        working-directory: kernel_src
+        run: |
+          curl -LSs "https://raw.githubusercontent.com/KernelSU-Next/KernelSU-Next/next/kernel/setup.sh" | bash -s "${{ inputs.ksu_branch }}"
+
+      - name: Setup Clang toolchain & AnyKernel3
+        run: |
+          mkdir -p toolchain/clang anykernel
+          CLANG_URL=$(curl -s https://api.github.com/repos/ZyCromerZ/Clang/releases/latest | grep "browser_download_url.*tar.gz" | head -n 1 | cut -d '"' -f 4)
+          wget -q "$CLANG_URL" -O clang.tar.gz
+          tar -xzf clang.tar.gz -C toolchain/clang
+          rm clang.tar.gz
+          git clone --depth=1 https://github.com/osm0sis/AnyKernel3.git anykernel
+
+      - name: Configure defconfig & enable KSU/Kprobes
+        working-directory: kernel_src
+        run: |
+          export ARCH=arm64
+          export SUBARCH=arm64
+          export PATH="$GITHUB_WORKSPACE/toolchain/clang/bin:$PATH"
+
+          make O=out ARCH=arm64 "${{ inputs.defconfig }}"
+
+          ./scripts/config --file out/.config \
+            -e KPROBES \
+            -e HAVE_KPROBES \
+            -e KPROBE_EVENTS \
+            -e KSU
+
+      - name: Compile kernel
+        working-directory: kernel_src
+        run: |
+          export ARCH=arm64
+          export SUBARCH=arm64
+          export PATH="$GITHUB_WORKSPACE/toolchain/clang/bin:$PATH"
+
+          make -j$(nproc --all) O=out \
+            ARCH=arm64 \
+            CC=clang \
+            CLANG_TRIPLE=aarch64-linux-gnu- \
+            CROSS_COMPILE=aarch64-linux-gnu- \
+            LD=ld.lld \
+            AR=llvm-ar \
+            NM=llvm-nm \
+            OBJCOPY=llvm-objcopy \
+            OBJDUMP=llvm-objdump \
+            READELF=llvm-readelf \
+            OBJSIZE=llvm-size \
+            STRIP=llvm-strip
+
+      - name: Package AnyKernel3 zip
+        run: |
+          IMAGE_PATH="kernel_src/out/arch/arm64/boot/Image.gz-dtb"
+          if [ ! -f "$IMAGE_PATH" ]; then
+            echo "Image.gz-dtb tidak ditemukan!"
+            exit 1
+          fi
+
+          rm -rf anykernel/.git anykernel/README.md
+          cp "$IMAGE_PATH" anykernel/
+
+          sed -i 's/device.name1=.*/device.name1=spes/' anykernel/anykernel.sh
+          sed -i 's/device.name2=.*/device.name2=spesn/' anykernel/anykernel.sh
+          sed -i 's/do.devicecheck=.*/do.devicecheck=1/' anykernel/anykernel.sh
+
+          cd anykernel
+          ZIP_NAME="KSU-Next_spes_$(date +%Y%m%d-%H%M).zip"
+          zip -r9 "../$ZIP_NAME" * -x '*.git*'
+
+      - name: Upload flashable zip artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: spes-ksu-next-kernel
+          path: KSU-Next_*.zip
+          if-no-files-found: error
