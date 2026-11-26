@@ -115,14 +115,24 @@ jobs:
 
       - name: Package AnyKernel3 zip
         run: |
-          IMAGE_PATH="kernel_src/out/arch/arm64/boot/Image.gz-dtb"
-          if [ ! -f "$IMAGE_PATH" ]; then
-            echo "Image.gz-dtb tidak ditemukan!"
+          BOOT_DIR="kernel_src/out/arch/arm64/boot"
+          ls -la "$BOOT_DIR" || true
+
+          rm -rf anykernel/.git anykernel/README.md
+
+          if [ -f "$BOOT_DIR/Image.gz-dtb" ]; then
+            cp "$BOOT_DIR/Image.gz-dtb" anykernel/
+          elif [ -f "$BOOT_DIR/Image.gz" ]; then
+            cp "$BOOT_DIR/Image.gz" anykernel/
+          elif [ -f "$BOOT_DIR/Image" ]; then
+            cp "$BOOT_DIR/Image" anykernel/
+          else
+            echo "Tidak ada berkas Image di $BOOT_DIR"
             exit 1
           fi
 
-          rm -rf anykernel/.git anykernel/README.md
-          cp "$IMAGE_PATH" anykernel/
+          find "$BOOT_DIR/dts" -name "*.dtb" -exec cp {} anykernel/ \; 2>/dev/null || true
+          [ -f "$BOOT_DIR/dtbo.img" ] && cp "$BOOT_DIR/dtbo.img" anykernel/ || true
 
           sed -i 's/device.name1=.*/device.name1=spes/' anykernel/anykernel.sh
           sed -i 's/device.name2=.*/device.name2=spesn/' anykernel/anykernel.sh
