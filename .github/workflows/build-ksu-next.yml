@@ -16,9 +16,9 @@ on:
         required: true
         default: 'vendor/spes-perf_defconfig'
       ksu_branch:
-        description: 'Branch KernelSU-Next'
+        description: 'Tag atau branch KernelSU-Next'
         required: true
-        default: 'next'
+        default: 'v0.9.5'
 
 jobs:
   build:
@@ -58,7 +58,13 @@ jobs:
       - name: Setup KernelSU-Next
         working-directory: kernel_src
         run: |
-          curl -LSs "https://raw.githubusercontent.com/KernelSU-Next/KernelSU-Next/next/kernel/setup.sh" | bash -s "${{ inputs.ksu_branch }}"
+          TARGET_KSU="${{ inputs.ksu_branch }}"
+          if [ -z "$TARGET_KSU" ] || [ "$TARGET_KSU" = "next" ]; then
+            TARGET_KSU=$(curl -s https://api.github.com/repos/KernelSU-Next/KernelSU-Next/tags | grep '"name":' | head -n 8 | grep -v 'v1\.' | head -n 1 | cut -d '"' -f 4)
+            TARGET_KSU="${TARGET_KSU:-v0.9.5}"
+          fi
+          echo "Memasang KernelSU-Next: $TARGET_KSU"
+          curl -LSs "https://raw.githubusercontent.com/KernelSU-Next/KernelSU-Next/next/kernel/setup.sh" | bash -s "$TARGET_KSU"
 
       - name: Setup Clang toolchain & AnyKernel3
         run: |
@@ -93,7 +99,7 @@ jobs:
           export SUBARCH=arm64
           export PATH="$GITHUB_WORKSPACE/toolchain/clang/bin:$PATH"
 
-          yes "" | make -j$(nproc --all) O=out \
+          make -j$(nproc --all) O=out \
             ARCH=arm64 \
             CC=clang \
             CLANG_TRIPLE=aarch64-linux-gnu- \
